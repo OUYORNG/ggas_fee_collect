@@ -1,0 +1,408 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ACADEMIC STRUCTURE ====================
+
+model Grade {
+  id           String   @id @default(cuid())
+  name         String   // "Nursery", "Kindergarten", "Grade 1", etc.
+  level        Int      // 0=Nursery, 1=KG, 2=Grade 1, etc.
+  description  String?
+  nextGradeId  String?  @unique // Self-referencing for promotion
+  nextGrade    Grade?   @relation("GradePromotion", fields: [nextGradeId], references: [id])
+  previousGrade Grade?  @relation("GradePromotion")
+  
+  programs     Program[]
+  students     Student[]
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@map("grades")
+}
+
+model Program {
+  id           String   @id @default(cuid())
+  name         String   // "English (Half-Day)", "English+Chinese (Full-Day)", etc.
+  code         String   @unique // "ENG-HD", "ENG+CH-FD", etc.
+  curriculum   String   // "English", "English+Khmer", "English+Chinese", "International", "Khmer"
+  type         String   // "Half-Day", "Full-Day"
+  language     String   // "English", "English+Khmer", "English+Chinese"
+  
+  gradeId      String?
+  grade        Grade?   @relation(fields: [gradeId], references: [id])
+  
+  feeItems     FeeItem[]
+  enrollments Enrollment[]
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@map("programs")
+}
+
+model Period {
+  id              String   @id @default(cuid())
+  name            String   // "Term 1", "Semester 1", "Full Year"
+  code            String   // "TERM1", "SEM1", "YEAR"
+  durationMonths  Float    // 2.5, 5, 10
+  academicYear    String   // "2025-2026"
+  startDate       DateTime
+  endDate         DateTime
+  
+  enrollments     Enrollment[]
+  studentFees     StudentFee[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([code, academicYear])
+  @@map("periods")
+}
+
+// ==================== STUDENT MANAGEMENT ====================
+
+model Student {
+  id              String   @id @default(cuid())
+  studentId       String   @unique // "STU-001", auto-generated
+  firstName       String
+  lastName        String
+  fullName        String   // Computed: firstName + lastName
+  gender          String   // "Male", "Female"
+  dob             DateTime @db.Date
+  photoUrl        String?
+  
+  gradeId         String?
+  grade           Grade?   @relation(fields: [gradeId], references: [id])
+  
+  enrollmentDate  DateTime @default(now())
+  status          StudentStatus @default(ACTIVE)
+  
+  // Guardian Info
+  guardianName    String
+  guardianPhone   String
+  guardianEmail   String?
+  guardianRelation String // "Father", "Mother", "Other"
+  
+  address         String?
+  notes           String?
+  
+  // Family Info (for sibling discounts)
+  familyId        String?
+  
+  enrollments     Enrollment[]
+  studentFees     StudentFee[]
+  payments        Payment[]
+  studentDiscounts StudentDiscount[]
+  studentVouchers StudentVoucher[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("students")
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+  TRANSFERRED
+  SUSPENDED
+}
+
+// ==================== ENROLLMENTS ====================
+
+model Enrollment {
+  id            String   @id @default(cuid())
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id])
+  
+  programId     String
+  program       Program  @relation(fields: [programId], references: [id])
+  
+  periodId      String
+  period        Period   @relation(fields: [periodId], references: [id])
+  
+  academicYear  String   // "2025-2026"
+  status        EnrollmentStatus @default(ENROLLED)
+  
+  // For tracking promotions
+  promotedFromId String?
+  
+  enrolledAt    DateTime @default(now())
+  
+  studentFees   StudentFee[]
+  
+  @@unique([studentId, programId, periodId])
+  @@map("enrollments")
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  COMPLETED
+  DROPPED
+  PROMOTED
+}
+
+// ==================== FEE STRUCTURE ====================
+
+model FeeItem {
+  id            String   @id @default(cuid())
+  code          String   @unique // "TUITION-001", "TRANSPORT-Z1", etc.
+  name          String
+  category      FeeCategory
+  description   String?
+  
+  amount        Float
+  
+  // Period type this fee applies to
+  periodType    String?  // "TERM", "SEMESTER", "YEAR", "ONETIME"
+  
+  // Applicable grades/programs
+  gradeId       String?
+  grade         Grade?   @relation(fields: [gradeId], references: [id])
+  
+  programId     String?
+  program       Program? @relation(fields: [programId], references: [id])
+  
+  isRequired    Boolean  @default(true)
+  isRecurring   Boolean  @default(true)
+  
+  // Due date configuration
+  dueDate       DateTime? @db.Date
+  
+  validFrom     DateTime?
+  validTo       DateTime?
+  
+  studentFees   StudentFee[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@map("fee_items")
+}
+
+enum FeeCategory {
+  TUITION
+  ENROLLMENT
+  REGISTRATION
+  MATERIALS
+  UNIFORM
+  TRANSPORTATION
+  MEALS
+  OTHER
+}
+
+// ==================== STUDENT FEES ====================
+
+model StudentFee {
+  id              String   @id @default(cuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id])
+  
+  enrollmentId    String?
+  enrollment      Enrollment? @relation(fields: [enrollmentId], references: [id])
+  
+  feeItemId       String
+  feeItem         FeeItem  @relation(fields: [feeItemId], references: [id])
+  
+  periodId        String?
+  period          Period?   @relation(fields: [periodId], references: [id])
+  
+  // Amounts
+  baseAmount      Float
+  discountAmount  Float     @default(0)
+  voucherAmount   Float     @default(0)
+  fineAmount      Float     @default(0)
+  totalAmount    Float
+  
+  // Status
+  status          FeeStatus @default(PENDING)
+  
+  dueDate        DateTime? @db.Date
+  paidAt         DateTime?
+  
+  // Who applied discounts
+  appliedBy      String?
+  appliedAt      DateTime?
+  
+  payments       Payment[]
+  discounts      StudentDiscount[]
+  vouchers       StudentVoucher[]
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@unique([studentId, feeItemId, periodId])
+  @@map("student_fees")
+}
+
+enum FeeStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+// ==================== DISCOUNTS ====================
+
+model DiscountType {
+  id              String   @id @default(cuid())
+  name            String   // "Sibling Discount (2nd)", "Early Payment", etc.
+  code            String   @unique // "SIBLING_2", "EARLY_PAY", etc.
+  type            DiscountTypeEnum // "PERCENTAGE", "FIXED"
+  value           Float    // 5, 10, 100, etc.
+  
+  // Configuration
+  category        DiscountCategory // "FAMILY", "PAYMENT", "SPECIAL"
+  maxApplicable   Float?   // Max discount amount (optional cap)
+  stackable       Boolean  @default(true)
+  priority        Int      @default(0) // Order of application
+  
+  // Conditions
+  minQuantity     Int?     // For sibling: min children
+  maxQuantity    Int?     // For sibling: max children
+  
+  isActive       Boolean  @default(true)
+  validFrom      DateTime?
+  validTo        DateTime?
+  
+  studentDiscounts StudentDiscount[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("discount_types")
+}
+
+enum DiscountTypeEnum {
+  PERCENTAGE
+  FIXED
+}
+
+enum DiscountCategory {
+  FAMILY      // Sibling discounts
+  PAYMENT     // Early payment, full year
+  SPECIAL     // Outstanding, staff, scholarship
+}
+
+// Student-specific discount (applied to a fee)
+model StudentDiscount {
+  id              String   @id @default(cuid())
+  studentFeeId    String
+  studentFee      StudentFee @relation(fields: [studentFeeId], references: [id])
+  
+  discountTypeId String
+  discountType   DiscountType @relation(fields: [discountTypeId], references: [id])
+  
+  appliedAmount  Float
+  notes          String?
+  
+  appliedBy      String?
+  appliedAt      DateTime @default(now())
+  
+  @@unique([studentFeeId, discountTypeId])
+  @@map("student_discounts")
+}
+
+// ==================== VOUCHERS ====================
+
+model Voucher {
+  id              String   @id @default(cuid())
+  code            String   @unique // "SAVE10", "WELCOME50", etc.
+  name            String
+  type            VoucherTypeEnum // "PERCENTAGE", "FIXED"
+  value           Float    // 10 = 10% or $10
+  
+  // What fee category it applies to
+  targetCategory  FeeCategory? // Apply only to this category, null = all
+  
+  // Usage limits
+  usageLimit      Int?     // Max uses (null = unlimited)
+  usedCount       Int      @default(0)
+  
+  // Validity
+  validFrom       DateTime?
+  validTo         DateTime?
+  
+  isActive        Boolean  @default(true)
+  
+  studentVouchers StudentVoucher[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("vouchers")
+}
+
+enum VoucherTypeEnum {
+  PERCENTAGE
+  FIXED
+}
+
+// Student-specific voucher (applied to a fee)
+model StudentVoucher {
+  id            String   @id @default(cuid())
+  studentFeeId  String
+  studentFee    StudentFee @relation(fields: [studentFeeId], references: [id])
+  
+  voucherId     String
+  voucher       Voucher   @relation(fields: [voucherId], references: [id])
+  
+  appliedAmount Float
+  usedAt        DateTime @default(now())
+  
+  @@unique([studentFeeId, voucherId])
+  @@map("student_vouchers")
+}
+
+// ==================== PAYMENTS ====================
+
+model Payment {
+  id              String   @id @default(cuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id])
+  
+  studentFeeId    String?
+  studentFee      StudentFee? @relation(fields: [studentFeeId], references: [id])
+  
+  amount          Float
+  paymentMethod   PaymentMethod // "CASH", "BANK_TRANSFER", "WING", "ABA", "CHEQUE"
+  
+  paymentDate     DateTime @default(now())
+  transactionRef  String?  // Bank/Wing reference number
+  
+  status          PaymentStatus @default(PENDING)
+  receiptNumber   String?  @unique
+  
+  collectedBy     String?  // Staff who collected
+  notes           String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("payments")
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  WING
+  ABA
+  CHEQUE
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
