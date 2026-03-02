@@ -9,11 +9,7 @@ services:
     ports:
       - "3001:3001"
     environment:
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=school123
-      - DATABASE_NAME=school_db
+      - DATABASE_URL=postgresql://postgres:school123@db:5432/school_db
     depends_on:
       db:
         condition: service_healthy
@@ -34,16 +30,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # Frontend - Next.js (for development, will run separately)
-  # frontend:
-  #   build: ./frontend
-  #   ports:
-  #     - "3000:3000"
-  #   volumes:
-  #     - ./frontend:/app
-  #     - /app/node_modules
-  #   command: npm run dev
 
 volumes:
   postgres_data:

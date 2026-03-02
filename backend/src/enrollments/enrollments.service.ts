@@ -138,7 +138,14 @@ export class EnrollmentsService {
   async promoteStudent(studentId: string) {
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
-      include: { grade: { include: { nextGrade: true } } },
+      include: { 
+        grade: { 
+          include: { 
+            nextGrade: { include: { programs: true } } 
+          } 
+        },
+        enrollments: true
+      },
     });
 
     if (!student?.grade?.nextGrade) {
